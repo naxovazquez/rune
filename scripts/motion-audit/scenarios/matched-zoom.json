@@ -1,0 +1,6 @@
+{
+  "events": [
+    { "t": 0.3, "type": "tap", "key": "card-1", "expect": "smooth", "element": "card-1" },
+    { "t": 1.5, "type": "tap", "key": "card-1", "expect": "smooth", "element": "card-1" }
+  ]
+}

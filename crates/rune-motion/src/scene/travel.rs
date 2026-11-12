@@ -15,6 +15,13 @@ impl Scene {
     /// scene rect, measured in `to`'s root space: a scroll offset the renderer applies outside the
     /// scene, which differs between the two places.
     pub fn match_geometry_offset(&mut self, from: NodeId, to: NodeId, offset: Vec2, anim: impl Into<LayoutAnim>) {
+        self.match_geometry_scaled(from, to, 1.0, [offset.x, offset.y], [0.0; 2], anim);
+    }
+
+    /// [`match_geometry`](Self::match_geometry) for a `from` drawn scaled: each scene edge `e` was
+    /// seen at `(e + before) * scale + after` in `to`'s root space (a zoom the renderer applies
+    /// outside the scene, about an anchor), and its velocity `scale` times its scene velocity.
+    pub fn match_geometry_scaled(&mut self, from: NodeId, to: NodeId, scale: f32, before: [f32; 2], after: [f32; 2], anim: impl Into<LayoutAnim>) {
         let (Some(a), Some(b)) = (self.slot(from), self.slot(to)) else { return };
         let anim = anim.into();
         if self.store.reduced_motion() {
@@ -24,9 +31,10 @@ impl Scene {
             self.apply(b, acts);
             return;
         }
-        let (mut start, vel) = self.exact_world(a);
-        for (k, edge) in start.iter_mut().enumerate() {
-            *edge += if k % 2 == 0 { offset.x } else { offset.y };
+        let (mut start, mut vel) = self.exact_world(a);
+        for (k, (edge, v)) in start.iter_mut().zip(&mut vel).enumerate() {
+            *edge = (*edge + before[k % 2]) * scale + after[k % 2];
+            *v *= scale;
         }
         let radius = self.current::<Corners>(a, prop::RADIUS).unwrap_or(self.nodes[a].radius);
         let fill = self.current::<Color>(a, prop::FILL).unwrap_or(self.nodes[a].fill);

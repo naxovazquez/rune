@@ -289,6 +289,29 @@ impl<S: 'static> Runtime<S> {
         }).collect()
     }
 
+    /// The ancestors' zoom (`(scale, anchor, anchor_to)`) flight `id` under `parent` draws under,
+    /// and the offset to add to it. A launch maps its start through the zoom at rest and flies
+    /// under it. A matched flight leaves where its source was drawn, under no zoom, and comes under
+    /// its destination's held zoom and live offsets (a pan) as it travels, so it lands at the place
+    /// and size it rests at, even under a zoom that mounted with it. Its path ends at its layout,
+    /// which leaves those offsets out.
+    pub(super) fn flight_frame(&self, id: NodeId, parent: Option<usize>, pinh: &Inh) -> ((f32, [f32; 2], [f32; 2]), [f32; 2]) {
+        if self.launches.launched(id) { return (pinh.still, [0.0; 2]); }
+        let (k, anchor, anchor_to) = pinh.held;
+        let travel = self.scene.get(id, prop::TRAVEL).unwrap_or(rune_motion::Vec2::new(1.0, 1.0));
+        let t = [travel.x.clamp(0.0, 1.0), travel.y.clamp(0.0, 1.0)];
+        let mut pan = [0.0; 2];
+        for p in std::iter::successors(parent, |&p| self.nodes[p].parent) {
+            if self.nodes[p].live.iter().any(|b| b.property == crate::live::Property::Offset)
+                && let Some(o) = self.scene.get(self.nodes[p].id, prop::OFFSET)
+            {
+                (pan[0], pan[1]) = (pan[0] + o.x, pan[1] + o.y);
+            }
+        }
+        let zoom = (1.0 + (k - 1.0) * (t[0] + t[1]) * 0.5, anchor, [0, 1].map(|a| anchor[a] + (anchor_to[a] - anchor[a]) * t[a]));
+        (zoom, [pan[0] * t[0], pan[1] * t[1]])
+    }
+
     /// Lands flight `id` at its layout, as if it had landed: it rides its parent from here.
     pub(super) fn land_flight(&mut self, id: NodeId) {
         self.flying.retain(|f| f.0 != id);
@@ -330,11 +353,16 @@ impl<S: 'static> Runtime<S> {
             let row = built.get(&from).and_then(|&k| self.row_dy.get(k)).copied().unwrap_or(0.0);
             let dest = std::iter::successors(nodes[i].parent, |&p| nodes[p].parent)
                 .map(|p| nodes[p].id).find(|id| built.contains_key(id)).map_or([0.0; 2], shift);
-            let offset = rune_motion::Vec2::new(source[0] - dest[0], source[1] + row - dest[1]);
+            // Where `from` was drawn: its layout through its parent's scale, so a flight off a
+            // zoomed board leaves at the size it was seen. `flight_scale` starts it under no zoom.
+            let (k, anchor, anchor_to) = self.nodes[from_i].parent.and_then(|p| built.get(&self.nodes[p].id)).and_then(|&b| self.inh_scratch.get(b))
+                .map_or((1.0, [0.0; 2], [0.0; 2]), |h| (h.scale, h.anchor, h.anchor_to));
+            let before = [source[0] - anchor[0], source[1] + row - anchor[1]];
+            let after = [anchor_to[0] - dest[0], anchor_to[1] - dest[1]];
             let spring = tx.motion.map(MotionSource::spring).or(nodes[i].matched.as_ref().and_then(|m| m.1)).unwrap_or(motion::REFLOW);
             let fill = self.color(from, P_FILL, self.nodes[from_i].vis.fill);
             let opacity = self.scene.get(from, prop::OPACITY);
-            self.scene.match_geometry_offset(from, to, offset, LayoutAnim::new(spring).screen());
+            self.scene.match_geometry_scaled(from, to, k, before, after, LayoutAnim::new(spring).screen());
             let live = |p: crate::live::Property| nodes[i].live.iter().any(|b| b.property == p);
             if fill != nodes[i].vis.fill && !live(crate::live::Property::Fill) {
                 self.scene.set(to, P_FILL, fill);

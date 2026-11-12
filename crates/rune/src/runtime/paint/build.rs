@@ -247,9 +247,9 @@ impl<S: 'static> Runtime<S> {
             if lift {
                 // Keep the destination's clips (consumed ones included) and offsets. Drop its
                 // ancestors' opacity, scale and blur: an entering parent's fade or scale would
-                // otherwise hide the flight or jump it off the rect it was seen at. The scales
-                // holding still above that parent (an app-wide zoom) stay, so it flies at the size
-                // it lands at. Inside another flight, also drop that flight's cover offset and clip.
+                // otherwise hide the flight or jump it off the rect it was seen at. The zoom above
+                // that parent stays (see `flight_frame`), so it lands at the size it rests at.
+                // Inside another flight, also drop that flight's cover offset and clip.
                 let [clip, fade, fade_origin] = if self.launches.flying(node_id) {
                     // A launch leaves where its clips don't reach.
                     [crate::render::NO_CLIP, [0.0; 4], pinh.fade_origin]
@@ -259,10 +259,10 @@ impl<S: 'static> Runtime<S> {
                         [clip, pinh.fade, pinh.fade_origin]
                     })
                 };
-                let (scale, anchor, anchor_to) = pinh.still;
+                let ((scale, anchor, anchor_to), pan) = self.flight_frame(node_id, node_parent, &pinh);
                 pinh = Inh { opacity: 1.0, paint_opacity: 1.0, hit_opacity: 1.0, clip, fade, fade_origin, paint_clip: clip, paint_fade: fade,
                     paint_fade_origin: fade_origin, rounded: None, scale, anchor, anchor_to, blur: 0.0,
-                    dx: pinh.dx - pinh.cover[0], dy: pinh.dy - pinh.cover[1], cover: [0.0; 2], outer: None,
+                    dx: pinh.dx - pinh.cover[0] + pan[0], dy: pinh.dy - pinh.cover[1] + pan[1], cover: [0.0; 2], outer: None,
                     scale_motion: ScaleMotion::Still, in_cache: false, skip_paint: false, turn: 0, snap: pixel_snap::Inherit { layer: 0, parent: None, ..pinh.snap }, ..pinh };
                 let fix = self.launches.offset_fix(&self.scene, node_id, [pinh.dx, pinh.dy], self.commit_gen);
                 (pinh.dx, pinh.dy) = (pinh.dx + fix[0], pinh.dy + fix[1]);
@@ -1215,6 +1215,7 @@ impl<S: 'static> Runtime<S> {
                 cover: cover_offset, outer, mark, group,
                 hit_opacity: hit_opacity * kids_fade, group_rect: if hover_owner { rect_pt } else { pinh.group_rect },
                 scale_motion, still: if scale_motion == ScaleMotion::Still { (scale, anchor, anchor_to) } else { pinh.still },
+                held: if scale_motion != ScaleMotion::Moving { (scale, anchor, anchor_to) } else { pinh.held },
                 in_cache, skip_paint, turn: turn_index,
                 snap: pixel_snap::Inherit { off: snap_off, rigid: snap_rigid, layer: if cover.is_some() { 0 } else { snap_layer }, parent: snap_rest.filter(|_| cover.is_none() && snap_rigid == pinh.snap.rigid && pixel_snap::frames(&n.vis)) } };
             // Shown only under its group's hover, it takes presses where the pointer hovers the
